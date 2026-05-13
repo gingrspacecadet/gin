@@ -13,6 +13,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdarg.h>
 
 // template instantiation logic
 
@@ -246,21 +247,25 @@ typedef struct {
     size_t len;
 } String;
 
+// use this in printf-style functions
+#define string_fmt(S) (int)S.len, S.ptr
+
 // bounds-checked string accessing
 static inline char string_at(String string, size_t index) {
     if (index >= string.len) {
-        return '\0';    // i might raise an error here instead
+        fprintf(stderr, "string_at: OOB access\n");
+        exit(1);
     }
     return string.ptr[index];
 }
 
-static inline String string_make(char *cstr) {
-    // i might add string interning here, idk
-    return (String){
-        .ptr = cstr,
-        .len = strlen(cstr)
-    };
-}
+// lets you have comptime and runtime strings
+#define string_make(cstr) (String){ \
+        .ptr = (cstr), \
+        .len = (__builtin_constant_p(__builtin_strlen(cstr)) \
+                   ? (sizeof(cstr) - 1) \
+                   : strlen(cstr)) \
+    }
 
 static inline bool string_eq(String a, String b) {
     if (a.len != b.len) return false;
@@ -289,4 +294,87 @@ static inline bool string_contains(String str, String needle) {
     String found = string_find(str, needle);
     if (found.ptr) return true;
     else return false;
+}
+
+// in-place cstring formatter
+static char *format(char *msg, ...) {
+    char *buf;
+    va_list args;
+    va_start(args, msg);
+    int n = vasprintf(&buf, msg, args);
+    if (n == -1) return msg;
+    else return buf;
+}
+
+// custom allocators
+
+typedef struct {
+    void **blocks;
+    size_t block_count;
+    size_t block_size;
+    size_t current_index;
+} Arena;
+
+#define __GIN_ARENA_BLOCK_SIZE (1024 * 1024)
+
+Arena *arena_create() {
+    Arena *a = malloc(sizeof(Arena));
+    if (!a) {
+        exit(1);
+    }
+    a->block_size = __GIN_ARENA_BLOCK_SIZE;
+    a->block_count = 1;
+    a->blocks = malloc(sizeof(void*));
+    if (!a->blocks) {
+        free(a);
+        exit(1);
+    }
+    a->blocks[0] = malloc(a->block_size);
+    if (!a->blocks[0]) {
+        free(a->blocks);
+        free(a);
+        exit(1);
+    }
+    a->current_index = 0;
+    return a;
+}
+
+void *arena_alloc(Arena *a, size_t size) {
+    if (size > a->block_size - a->current_index) {
+        a->block_count++;
+        a->blocks = realloc(a->blocks, a->block_count * sizeof(void*));
+        if (!a->blocks) {
+            exit(1);
+        }
+        a->blocks[a->block_count - 1] = malloc(a->block_size);
+        if (!a->blocks[a->block_count - 1]) {
+            exit(1);
+        }
+        a->current_index = 0;
+    }
+
+    void *data = (char*)a->blocks[a->block_count - 1] + a->current_index;
+    a->current_index += size;
+    return data;
+}
+
+void *arena_calloc(Arena *a, size_t size) {
+    void *data = arena_alloc(a, size);
+    memset(data, 0, size);
+    return data;
+}
+
+char *arena_strdup(Arena *a, char *s) {
+    size_t n = strlen(s) + 1;
+    char *dst = arena_alloc(a, n);
+    memcpy(dst, s, n);
+    return dst;
+}
+
+void arena_destroy(Arena *a) {
+    for (size_t i = 0; i < a->block_count; i++) {
+        free(a->blocks[i]);
+    }
+    free(a->blocks);
+    free(a);
 }
