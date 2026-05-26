@@ -297,7 +297,7 @@ static inline bool string_contains(String str, String needle) {
 }
 
 // in-place cstring formatter
-static char *format(char *msg, ...) {
+static inline char *format(char *msg, ...) {
     char *buf;
     va_list args;
     va_start(args, msg);
@@ -317,7 +317,7 @@ typedef struct {
 
 #define __GIN_ARENA_BLOCK_SIZE (1024 * 1024)
 
-Arena *arena_create() {
+static inline Arena *arena_create() {
     Arena *a = malloc(sizeof(Arena));
     if (!a) {
         exit(1);
@@ -339,7 +339,7 @@ Arena *arena_create() {
     return a;
 }
 
-void *arena_alloc(Arena *a, size_t size) {
+static inline void *arena_alloc(Arena *a, size_t size) {
     if (size > a->block_size - a->current_index) {
         a->block_count++;
         a->blocks = realloc(a->blocks, a->block_count * sizeof(void*));
@@ -358,20 +358,20 @@ void *arena_alloc(Arena *a, size_t size) {
     return data;
 }
 
-void *arena_calloc(Arena *a, size_t size) {
+static inline void *arena_calloc(Arena *a, size_t size) {
     void *data = arena_alloc(a, size);
     memset(data, 0, size);
     return data;
 }
 
-char *arena_strdup(Arena *a, char *s) {
+static inline char *arena_strdup(Arena *a, char *s) {
     size_t n = strlen(s) + 1;
     char *dst = arena_alloc(a, n);
     memcpy(dst, s, n);
     return dst;
 }
 
-void arena_destroy(Arena *a) {
+static inline void arena_destroy(Arena *a) {
     for (size_t i = 0; i < a->block_count; i++) {
         free(a->blocks[i]);
     }
