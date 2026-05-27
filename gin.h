@@ -77,7 +77,7 @@ typedef struct { \
 static N##_array N##_array_empty = {}; \
 static inline N##_array N##_array_init(void) { \
     N##_array v = {}; \
-    v.data = (T*)xcalloc(1, sizeof(T)); \
+    v.data = (T*)xcalloc(sizeof(T)); \
     v.len = 0; \
     v.cap = 1; \
     v.alive = true; \
