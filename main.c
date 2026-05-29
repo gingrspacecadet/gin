@@ -2,7 +2,7 @@
 
 INSTANTIATE(int, int, ARRAY_TEMPLATE)
 INSTANTIATE(char, char, OPTIONAL_TEMPLATE)
-INSTANTIATE(char*, chars, HASHMAP_TEMPLATE)
+INSTANTIATE(char, char *, chars, HASHMAP_TEMPLATE)
 
 int main(void) {
     int_array array = int_array_init();
@@ -11,4 +11,13 @@ int main(void) {
 
     String s = string_make(format("Hello, %s", "world!"));
     printf("%.*s\n", string_fmt(s));
+
+    chars_hashmap_put(&hashmap, "foo", "bar");
+    char *bar;
+    chars_hashmap_get(&hashmap, "foo", &bar);
+    printf("%s\n", bar);
+
+    char *baz = xstrdup("baz\n");
+    printf(baz);
+    free(baz);
 }

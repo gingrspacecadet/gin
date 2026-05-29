@@ -42,6 +42,13 @@ static inline void *xrealloc(void *ptr, size_t size) {
     return ptr;
 }
 
+static inline char *xstrdup(char *s) {
+    char *p = strdup(s);
+    if (!p) {
+        fprintf(stderr, "xstrdup: failed to allocate %zu bytes\n", s ? strlen(s) : -1);
+    }
+}
+
 // template instantiation logic
 
 #define __GIN_VA_NARGS_IMPL(_1,_2,_3,_4,_5,_6,_7,_8,N,...) N
@@ -150,20 +157,23 @@ typedef struct N##_optional { \
     T value; \
 } N##_optional; \
 
-static inline unsigned long __gin_hash(const char *str) {
+static inline unsigned long __gin_hash(const uint8_t *data, size_t len) {
     unsigned long h = 5381;
-    int c;
-    while ((c = *str++))
-        h = ((h << 5) + h) + (unsigned char)c;
+    size_t i;
+    for (i = 0; i < len; ++i)
+        h = ((h << 5) + h) + (unsigned long)data[i];
     return h;
 }
 
-// simple hashmap template. currently, all keys are strings but i will change that
-#define HASHMAP_TEMPLATE(T, N) \
+#define HASHMAP_TEMPLATE(K, V, N) \
+__attribute__((weak)) K N##_dup(const K *k) { K out; memcpy(&out, k, sizeof(K)); return out; } \
+__attribute__((weak)) void N##_free(K k) { (void)k; } \
+__attribute__((weak)) int N##_eq(const K *a, const K *b) { return memcmp(a, b, sizeof(K)) == 0; } \
+__attribute__((weak)) unsigned long N##_hash(const K *k) { return __gin_hash((const uint8_t*)k, sizeof(K)); } \
 typedef struct N##_entry N##_entry; \
 struct N##_entry { \
-    char *key; \
-    T value; \
+    K key; \
+    V value; \
     N##_entry *next; \
 }; \
 typedef struct N##_hashmap N##_hashmap; \
@@ -185,7 +195,7 @@ static inline void N##_hashmap_free(N##_hashmap *hm) { \
         N##_entry *e = hm->buckets[i]; \
         while (e) { \
             N##_entry *next = e->next; \
-            free(e->key); \
+            N##_free(e->key); \
             free(e); \
             e = next; \
         } \
@@ -195,6 +205,7 @@ static inline void N##_hashmap_free(N##_hashmap *hm) { \
     hm->cap = hm->count = 0; \
 } \
 static inline void N##_hashmap_rehash(N##_hashmap *hm, size_t newcap) { \
+    if (!hm || !hm->buckets) return; \
     N##_entry **old = hm->buckets; \
     size_t oldcap = hm->cap; \
     hm->buckets = (N##_entry**)calloc(newcap, sizeof(N##_entry*)); \
@@ -203,7 +214,7 @@ static inline void N##_hashmap_rehash(N##_hashmap *hm, size_t newcap) { \
         N##_entry *e = old[i]; \
         while (e) { \
             N##_entry *next = e->next; \
-            unsigned long h = __gin_hash(e->key) % hm->cap; \
+            unsigned long h = N##_hash(&e->key) % hm->cap; \
             e->next = hm->buckets[h]; \
             hm->buckets[h] = e; \
             e = next; \
@@ -211,47 +222,50 @@ static inline void N##_hashmap_rehash(N##_hashmap *hm, size_t newcap) { \
     } \
     free(old); \
 } \
-static inline void N##_hashmap_put(N##_hashmap *hm, const char *key, T value) { \
+static inline void N##_hashmap_put(N##_hashmap *hm, const K *key, V value) { \
     if (!hm) return; \
-    if (hm->count > hm->cap * 1.5) { \
+    if (!hm->buckets) { hm->cap = 16; hm->buckets = (N##_entry**)calloc(hm->cap, sizeof(N##_entry*)); } \
+    if (hm->count > (size_t)(hm->cap * 1.5)) { \
         N##_hashmap_rehash(hm, hm->cap * 2); \
     } \
-    unsigned long h = __gin_hash(key) % hm->cap; \
+    unsigned long h = N##_hash(key) % hm->cap; \
     N##_entry *e = hm->buckets[h]; \
     while (e) { \
-        if (strcmp(e->key, key) == 0) { \
+        if (N##_eq(&e->key, key)) { \
             e->value = value; \
             return; \
         } \
         e = e->next; \
     } \
-    N##_entry *ne = (N##_entry*)xmalloc(sizeof(N##_entry)); \
-    ne->key = xstrdup(key); \
+    N##_entry *ne = (N##_entry*)malloc(sizeof(N##_entry)); \
+    ne->key = N##_dup(key); \
     ne->value = value; \
     ne->next = hm->buckets[h]; \
     hm->buckets[h] = ne; \
     hm->count++; \
 } \
-static inline T N##_hashmap_get(N##_hashmap *hm, const char *key) { \
-    T nullv = (T)0; \
-    if (!hm || !hm->buckets) return nullv; \
-    unsigned long h = __gin_hash(key) % hm->cap; \
+static inline int N##_hashmap_get(N##_hashmap *hm, const K *key, V *out) { \
+    if (!hm || !hm->buckets) return 0; \
+    unsigned long h = N##_hash(key) % hm->cap; \
     N##_entry *e = hm->buckets[h]; \
     while (e) { \
-        if (strcmp(e->key, key) == 0) return e->value; \
+        if (N##_eq(&e->key, key)) { \
+            if (out) *out = e->value; \
+            return 1; \
+        } \
         e = e->next; \
     } \
-    return nullv; \
+    return 0; \
 } \
-static inline int N##_hashmap_remove(N##_hashmap *hm, const char *key) { \
+static inline int N##_hashmap_remove(N##_hashmap *hm, const K *key) { \
     if (!hm || !hm->buckets) return 0; \
-    unsigned long h = __gin_hash(key) % hm->cap; \
+    unsigned long h = N##_hash(key) % hm->cap; \
     N##_entry *e = hm->buckets[h]; \
     N##_entry *prev = NULL; \
     while (e) { \
-        if (strcmp(e->key, key) == 0) { \
+        if (N##_eq(&e->key, key)) { \
             if (prev) prev->next = e->next; else hm->buckets[h] = e->next; \
-            free(e->key); \
+            N##_free(e->key); \
             free(e); \
             hm->count--; \
             return 1; \
