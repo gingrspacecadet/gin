@@ -19,5 +19,7 @@ int main(void) {
 
     char *baz = xstrdup("baz\n");
     printf(baz);
-    free(baz);
+
+    defer(printf(", world!\n"));
+    printf("Hello");
 }

@@ -18,6 +18,10 @@
 #include <stdint.h>
 #undef _GNU_SOURCE
 
+#define defer(S) \
+  void __cleanup_##__COUNTER__(int *_) { S; } \
+  int __var_##__COUNTER__ __attribute__((__cleanup__(__cleanup_##__COUNTER__)))
+
 static inline void *xmalloc(size_t size) {
     void *ptr = malloc(size);
     if (!ptr) {
